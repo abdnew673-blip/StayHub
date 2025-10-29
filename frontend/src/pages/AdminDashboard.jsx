@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { supabase } from '../lib/supabase';
+import { api } from '../lib/api';
 import { Plus, Edit2, Trash2, Hotel as HotelIcon, Loader2, DoorOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const AdminDashboard = () => {
   const { isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('hotels');   // 'hotels' | 'rooms' | 'reservations'
+  const [activeTab, setActiveTab] = useState('hotels');
   const [hotels, setHotels] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,9 +33,8 @@ export const AdminDashboard = () => {
 
   const fetchHotels = async () => {
     try {
-      const { data, error } = await supabase.from('hotels').select('*').order('created_at', { ascending: false });
-      if (error) throw error;
-      setHotels(data || []);
+      const data = await api.hotels.getAll();
+      setHotels(data);
     } catch (error) {
       console.error('Error fetching hotels:', error);
     } finally {
@@ -45,9 +44,18 @@ export const AdminDashboard = () => {
 
   const fetchRooms = async () => {
     try {
-      const { data, error } = await supabase.from('rooms').select('*, hotel:hotels(name)').order('created_at', { ascending: false });
-      if (error) throw error;
-      setRooms(data || []);
+      const data = await api.rooms.getAll();
+      const roomsWithHotel = await Promise.all(
+        data.map(async (room) => {
+          try {
+            const hotel = await api.hotels.getById(room.hotel_id);
+            return { ...room, hotel: { name: hotel.name } };
+          } catch {
+            return { ...room, hotel: { name: 'Unknown' } };
+          }
+        })
+      );
+      setRooms(roomsWithHotel);
     } catch (error) {
       console.error('Error fetching rooms:', error);
     }
@@ -57,8 +65,7 @@ export const AdminDashboard = () => {
     if (!confirm('Are you sure you want to delete this hotel?')) return;
 
     try {
-      const { error } = await supabase.from('hotels').delete().eq('id', id);
-      if (error) throw error;
+      await api.hotels.delete(id);
       toast.success('Hotel deleted successfully');
       fetchHotels();
     } catch (error) {
@@ -70,8 +77,7 @@ export const AdminDashboard = () => {
     if (!confirm('Are you sure you want to delete this room?')) return;
 
     try {
-      const { error } = await supabase.from('rooms').delete().eq('id', id);
-      if (error) throw error;
+      await api.rooms.delete(id);
       toast.success('Room deleted successfully');
       fetchRooms();
     } catch (error) {
@@ -331,12 +337,26 @@ const HotelFormModal = ({
       };
 
       if (hotel) {
-        const { error } = await supabase.from('hotels').update(hotelData).eq('id', hotel.id);
-        if (error) throw error;
+        const formDataToSend = new FormData();
+        Object.keys(hotelData).forEach(key => {
+          if (key === 'amenities') {
+            formDataToSend.append(key, JSON.stringify(hotelData[key]));
+          } else {
+            formDataToSend.append(key, hotelData[key]);
+          }
+        });
+        await api.hotels.update(hotel.id, formDataToSend);
         toast.success('Hotel updated successfully');
       } else {
-        const { error } = await supabase.from('hotels').insert(hotelData);
-        if (error) throw error;
+        const formDataToSend = new FormData();
+        Object.keys(hotelData).forEach(key => {
+          if (key === 'amenities') {
+            formDataToSend.append(key, JSON.stringify(hotelData[key]));
+          } else {
+            formDataToSend.append(key, hotelData[key]);
+          }
+        });
+        await api.hotels.create(formDataToSend);
         toast.success('Hotel added successfully');
       }
 
@@ -469,12 +489,10 @@ const RoomFormModal = ({
 
     try {
       if (room) {
-        const { error } = await supabase.from('rooms').update(formData).eq('id', room.id);
-        if (error) throw error;
+        await api.rooms.update(room.id, formData);
         toast.success('Room updated successfully');
       } else {
-        const { error } = await supabase.from('rooms').insert(formData);
-        if (error) throw error;
+        await api.rooms.create(formData);
         toast.success('Room added successfully');
       }
 
